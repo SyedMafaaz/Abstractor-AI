@@ -222,10 +222,6 @@ function App() {
           <>
             <div className="hero">
               <h1>Transform Text into Clarity</h1>
-              <p>
-                Abstractor uses advanced AI to distill your documents and text into 
-                concise, meaningful summaries. Paste text or upload a file to get started.
-              </p>
             </div>
 
             <div className="summarizer-container">
