@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 
 const MIN_CHARS = 100;
-const MAX_CHARS_DISPLAY = 150;
 
 function App() {
   const [text, setText] = useState('');
@@ -15,6 +14,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('summarize');
   const [selectedHistory, setSelectedHistory] = useState(null);
   const [stats, setStats] = useState(null);
+  const [summaryLength, setSummaryLength] = useState('medium');
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -28,13 +28,14 @@ function App() {
     }
   }, []);
 
-  const saveToHistory = (originalText, summaryText, source = 'text') => {
+  const saveToHistory = (originalText, summaryText, source = 'text', lengthPreset = 'medium') => {
     const newEntry = {
       id: Date.now(),
       date: new Date().toISOString(),
       originalText: originalText.substring(0, 500),
       summary: summaryText,
       source,
+      lengthPreset,
     };
 
     const updatedHistory = [newEntry, ...history].slice(0, 20);
@@ -125,12 +126,13 @@ function App() {
       if (file) {
         const formData = new FormData();
         formData.append('file', file);
+        formData.append('length', summaryLength);
         response = await axios.post('/api/summarize/file', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
           timeout: 120000,
         });
       } else {
-        response = await axios.post('/api/summarize', { text }, {
+        response = await axios.post('/api/summarize', { text, length: summaryLength }, {
           timeout: 120000,
         });
       }
@@ -141,11 +143,13 @@ function App() {
           originalLength: response.data.original_length,
           summaryLength: response.data.summary_length,
           reduction: Math.round((1 - response.data.summary_length / response.data.original_length) * 100),
+          lengthPreset: response.data.length_preset,
         });
         saveToHistory(
           file ? `[File: ${file.name}]` : text,
           response.data.summary,
-          file ? 'file' : 'text'
+          file ? 'file' : 'text',
+          summaryLength
         );
       } else {
         setError(response.data.error || 'An error occurred during summarization.');
@@ -190,6 +194,15 @@ function App() {
       hour: '2-digit',
       minute: '2-digit',
     });
+  };
+
+  const getLengthLabel = (length) => {
+    switch (length) {
+      case 'short': return 'Brief & Concise';
+      case 'medium': return 'Balanced Summary';
+      case 'long': return 'Detailed Overview';
+      default: return 'Balanced Summary';
+    }
   };
 
   return (
@@ -274,6 +287,30 @@ function App() {
                   </div>
                 )}
 
+                <div className="length-selector">
+                  <div className="length-label">
+                    <span>📏</span> Summary Length
+                  </div>
+                  <div className="length-options">
+                    {['short', 'medium', 'long'].map((length) => (
+                      <button
+                        key={length}
+                        className={`length-btn ${summaryLength === length ? 'active' : ''}`}
+                        onClick={() => setSummaryLength(length)}
+                        disabled={loading}
+                      >
+                        <span className="length-btn-icon">
+                          {length === 'short' && '⚡'}
+                          {length === 'medium' && '⚖️'}
+                          {length === 'long' && '📚'}
+                        </span>
+                        <span className="length-btn-text">{length.charAt(0).toUpperCase() + length.slice(1)}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="length-hint">{getLengthLabel(summaryLength)}</p>
+                </div>
+
                 {error && (
                   <div className="validation-message">
                     <span>⚠️</span> {error}
@@ -312,6 +349,11 @@ function App() {
                   <h2 className="section-title">
                     <span>🎯</span> Summary
                   </h2>
+                  {stats?.lengthPreset && (
+                    <span className="length-badge">
+                      {stats.lengthPreset.charAt(0).toUpperCase() + stats.lengthPreset.slice(1)}
+                    </span>
+                  )}
                 </div>
 
                 {summary ? (
@@ -368,9 +410,14 @@ function App() {
                   >
                     <div className="history-item-header">
                       <span className="history-item-date">{formatDate(item.date)}</span>
-                      <span className="history-item-badge">
-                        {item.source === 'file' ? '📎 File' : '📝 Text'}
-                      </span>
+                      <div className="history-badges">
+                        {item.lengthPreset && (
+                          <span className="history-item-length">{item.lengthPreset}</span>
+                        )}
+                        <span className="history-item-badge">
+                          {item.source === 'file' ? '📎 File' : '📝 Text'}
+                        </span>
+                      </div>
                     </div>
                     <p className="history-item-preview">{item.summary}</p>
                   </div>
@@ -397,6 +444,12 @@ function App() {
                 <p className="modal-section-title">Date</p>
                 <p className="modal-section-content">{formatDate(selectedHistory.date)}</p>
               </div>
+              {selectedHistory.lengthPreset && (
+                <div className="modal-section">
+                  <p className="modal-section-title">Length Preset</p>
+                  <p className="modal-section-content">{selectedHistory.lengthPreset.charAt(0).toUpperCase() + selectedHistory.lengthPreset.slice(1)}</p>
+                </div>
+              )}
               <div className="modal-section">
                 <p className="modal-section-title">Original Input</p>
                 <p className="modal-section-content">{selectedHistory.originalText}</p>

@@ -16,6 +16,12 @@ ALLOWED_EXTENSIONS = {'pdf', 'txt', 'docx'}
 
 HF_API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
 
+LENGTH_CONFIGS = {
+    'short': {'max_length': 80, 'min_length': 25, 'sentences': 2},
+    'medium': {'max_length': 150, 'min_length': 50, 'sentences': 4},
+    'long': {'max_length': 250, 'min_length': 80, 'sentences': 6}
+}
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -68,7 +74,11 @@ def chunk_text(text, max_chunk_size=1000):
     
     return chunks if chunks else [text[:max_chunk_size]]
 
-def abstractive_summarize(text, max_length=150, min_length=40):
+def abstractive_summarize(text, length='medium'):
+    config = LENGTH_CONFIGS.get(length, LENGTH_CONFIGS['medium'])
+    max_length = config['max_length']
+    min_length = config['min_length']
+    
     hf_token = os.environ.get('HUGGINGFACE_API_TOKEN')
     
     if hf_token:
@@ -77,7 +87,9 @@ def abstractive_summarize(text, max_length=150, min_length=40):
         chunks = chunk_text(text, max_chunk_size=1000)
         summaries = []
         
-        for chunk in chunks[:5]:
+        max_chunks = 3 if length == 'short' else (5 if length == 'medium' else 7)
+        
+        for chunk in chunks[:max_chunks]:
             payload = {
                 "inputs": chunk,
                 "parameters": {
@@ -94,25 +106,28 @@ def abstractive_summarize(text, max_length=150, min_length=40):
                     if isinstance(result, list) and len(result) > 0:
                         summaries.append(result[0].get('summary_text', ''))
                 elif response.status_code == 503:
-                    return extractive_summarize(text)
+                    return extractive_summarize(text, length)
                 else:
-                    return extractive_summarize(text)
+                    return extractive_summarize(text, length)
             except requests.exceptions.Timeout:
-                return extractive_summarize(text)
+                return extractive_summarize(text, length)
             except Exception:
-                return extractive_summarize(text)
+                return extractive_summarize(text, length)
         
         if summaries:
             combined = " ".join(summaries)
             return combined
     
-    return extractive_summarize(text)
+    return extractive_summarize(text, length)
 
-def extractive_summarize(text):
+def extractive_summarize(text, length='medium'):
+    config = LENGTH_CONFIGS.get(length, LENGTH_CONFIGS['medium'])
+    target_sentences = config['sentences']
+    
     sentences = re.split(r'(?<=[.!?])\s+', text)
     sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
     
-    if len(sentences) <= 3:
+    if len(sentences) <= target_sentences:
         return " ".join(sentences)
     
     word_freq = {}
@@ -140,7 +155,7 @@ def extractive_summarize(text):
         sentence_scores.append((i, sentence, score))
     
     sentence_scores.sort(key=lambda x: x[2], reverse=True)
-    num_sentences = max(3, len(sentences) // 4)
+    num_sentences = max(target_sentences, len(sentences) // 4)
     top_sentences = sorted(sentence_scores[:num_sentences], key=lambda x: x[0])
     
     summary = " ".join([s[1] for s in top_sentences])
@@ -154,6 +169,10 @@ def summarize_text():
             return jsonify({'error': 'No text provided'}), 400
         
         text = data['text'].strip()
+        length = data.get('length', 'medium')
+        
+        if length not in LENGTH_CONFIGS:
+            length = 'medium'
         
         if len(text) < 100:
             return jsonify({
@@ -162,13 +181,14 @@ def summarize_text():
                 'required_length': 100
             }), 400
         
-        summary = abstractive_summarize(text)
+        summary = abstractive_summarize(text, length)
         
         return jsonify({
             'success': True,
             'summary': summary,
             'original_length': len(text),
-            'summary_length': len(summary)
+            'summary_length': len(summary),
+            'length_preset': length
         })
     
     except Exception as e:
@@ -181,6 +201,10 @@ def summarize_file():
             return jsonify({'error': 'No file provided'}), 400
         
         file = request.files['file']
+        length = request.form.get('length', 'medium')
+        
+        if length not in LENGTH_CONFIGS:
+            length = 'medium'
         
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
@@ -212,14 +236,15 @@ def summarize_file():
                 'required_length': 100
             }), 400
         
-        summary = abstractive_summarize(text)
+        summary = abstractive_summarize(text, length)
         
         return jsonify({
             'success': True,
             'summary': summary,
             'original_length': len(text),
             'summary_length': len(summary),
-            'filename': filename
+            'filename': filename,
+            'length_preset': length
         })
     
     except Exception as e:
